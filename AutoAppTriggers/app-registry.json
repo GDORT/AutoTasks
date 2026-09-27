@@ -1,0 +1,11 @@
+{
+  "apps": [
+    {
+      "name": "TRAE",
+      "displayName": "TRAE Work CN",
+      "exePath": "D:\\Programs\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+      "workDir": "D:\\Programs\\TRAE SOLO CN",
+      "hooks": []
+    }
+  ]
+}

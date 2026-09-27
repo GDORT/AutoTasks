@@ -1,0 +1,19 @@
+# 本机配置（机器相关路径，不入库；克隆后复制 config.local.example.json 改名填写）
+config.local.json
+
+# 运行时状态（由 run-task 生成，含路径/结果，不入库）
+task-status.json
+task-run.log
+AutoCDriveMonitor/baseline.json
+AutoCDriveMonitor/ALERT.txt
+
+# 签到共享日志（运行时生成，幂等判断用）
+**/checkin.log
+
+# C盘检查运行时产物（每次运行生成）
+AutoCDriveMonitor/scan_log.csv
+AutoCDriveMonitor/scan_report.md
+
+# 临时诊断文件
+_*.txt
+*.tmp

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "baseDir": "D:\\AIAppData\\AutoTasks",
+  "description": "统一任务注册表：每任务一项，含 触发(trigger) / 可靠性(reliability) / 执行器(executorType) / 命令(command) / 去重周期(period) / 开关(enabled)。Trigger 独立，执行器多态，可靠性按任务标定。",
+  "tasks": [
+    {
+      "name": "chore-scan",
+      "description": "OBDOC 差事自动扫描更新（原自动化 7395cdd6，每日 00:10）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=10" },
+      "reliability": "best-effort",
+      "executorType": "shell",
+      "command": "& '.\\chore-scan.ps1'",
+      "period": "daily",
+      "enabled": true
+    },
+    {
+      "name": "daily-checkin",
+      "description": "每日签到（WorkBuddy+TRAE 双签 + skill 更新检查；统一 must 触发=自动化 31e98286 00:05，AI 执行器经 run-task 领号/记终态）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=5" },
+      "reliability": "must",
+      "executorType": "ai",
+      "command": "& '.\\AutoCheckin\\checkin_all.ps1'",
+      "period": "daily",
+      "enabled": true
+    },
+    {
+      "name": "cdrive-monthly",
+      "description": "C盘月度检查（已改为真正定时：自动化 33c42a3b，每月 1/15 09:00）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=MONTHLY;BYMONTHDAY=1,15;BYHOUR=9" },
+      "reliability": "best-effort",
+      "executorType": "shell",
+      "command": "& '.\\AutoCDriveMonitor\\check.ps1'",
+      "period": "monthly",
+      "enabled": true
+    }
+  ]
+}
