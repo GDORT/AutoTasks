@@ -43,8 +43,11 @@ if ($LASTEXITCODE -ne 0) { throw "scan_changes --update 失败 (exit $LASTEXITCO
 $report = Get-Content $ChangeReportJson -Encoding UTF8 | ConvertFrom-Json
 if ($report.git_error) { throw "git 读取错误: $($report.git_error)" }
 if ($report.add_targets -and $report.add_targets.Count -gt 0) {
-  & git -C $Vault add -- $($report.add_targets -join ' ')
-  if ($LASTEXITCODE -ne 0) { throw 'git add 失败' }
+  # 逐个 add，避免 -join ' ' 把多路径并成单个 pathspec 导致 git 报 “No such file or directory”
+  foreach ($t in $report.add_targets) {
+    & git -C $Vault add -- $t
+    if ($LASTEXITCODE -ne 0) { throw "git add 失败: $t" }
+  }
   & git -C $Vault commit -m $report.commit_message
   if ($LASTEXITCODE -ne 0) { throw 'git commit 失败' }
 }

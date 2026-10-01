@@ -22,12 +22,31 @@ $Root  = Split-Path $MyInvocation.MyCommand.Path
 
 Write-Host "===== 手动一键签到开始 ====="
 
+$failed = @()
+
 # ---- 1) WorkBuddy（结果由子脚本写入 checkin.log）----
+# 子脚本成功 exit 0 / 失败 exit 5；任一失败则让整体任务标红（不再静默掩盖）
+Write-Host "--- [1/2] WorkBuddy 签到 ---"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "WorkBuddy\workbuddy_checkin.ps1")
+if ($LASTEXITCODE -ne 0) {
+    $failed += "WorkBuddy"
+    Write-Warning "WorkBuddy 签到失败（exit=$LASTEXITCODE），详见 WorkBuddy\checkin.log"
+}
 
 # ---- 2) TRAE（结果由 checkin.js 写入 checkin.log）----
+Write-Host "--- [2/2] TRAE 签到 ---"
 $node = $cfg.nodeExe
 if (-not (Test-Path $node)) { $node = $cfg.traeExe }
-& $node (Join-Path $Root "TraeWork\checkin.js") 2>&1 | Out-Host
+$traeOut = & $node (Join-Path $Root "TraeWork\checkin.js") 2>&1
+$traeOut | ForEach-Object { Write-Host $_ }
+if ($LASTEXITCODE -ne 0) {
+    $failed += "TRAE"
+    Write-Warning "TRAE 签到失败（exit=$LASTEXITCODE），详见 AutoCheckin\checkin.log"
+}
 
 Write-Host "===== 手动一键签到结束 ====="
+
+if ($failed.Count -gt 0) {
+    Write-Error ("签到部分失败：$($failed -join ' / ')（已分别写入各自 checkin.log，上方有 WARNING 提示）")
+    exit 1
+}

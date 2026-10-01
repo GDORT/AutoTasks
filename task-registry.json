@@ -15,10 +15,10 @@
     },
     {
       "name": "daily-checkin",
-      "description": "每日签到（WorkBuddy+TRAE 双签 + skill 更新检查；统一 must 触发=自动化 31e98286 00:05，AI 执行器经 run-task 领号/记终态）",
+      "description": "每日签到（WorkBuddy+TRAE 双签；must，可靠性靠本地计划任务 AutoTasks.daily-checkin 的 StartWhenAvailable 兜底——PC 关机日开机自动补跑，经 run-task 闸门去重/记状态）",
       "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=5" },
       "reliability": "must",
-      "executorType": "ai",
+      "executorType": "shell",
       "command": "& '.\\AutoCheckin\\checkin_all.ps1'",
       "period": "daily",
       "enabled": true

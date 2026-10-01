@@ -62,7 +62,9 @@ if (-not $wbProc) {
 # ---- 3) Run the skill script and log the result ----
 if (Test-Path $SkillLog) { Remove-Item $SkillLog -Force -ErrorAction SilentlyContinue }
 
-& $Py $SkillScript *> $null
+# 变量捕获而非 *> $null：PS 5.1 下原生命令写 stderr 会触发 NativeCommandError，
+# 改用 2>&1 并入变量可彻底规避；结果仍从 $SkillLog 文件读取，不受 stdout 丢弃影响。
+$wbOut = & $Py $SkillScript 2>&1
 
 $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $detail = "no-result"
