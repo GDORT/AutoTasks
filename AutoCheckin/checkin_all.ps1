@@ -33,12 +33,11 @@ if ($LASTEXITCODE -ne 0) {
     Write-Warning "WorkBuddy 签到失败（exit=$LASTEXITCODE），详见 WorkBuddy\checkin.log"
 }
 
-# ---- 2) TRAE（结果由 checkin.js 写入 checkin.log）----
+# ---- 2) TRAE（走 trae_task.ps1，复用「当天已签则跳过」守卫）----
+# 原实现直接调 checkin.js，绕过了 trae_task.ps1 的守卫；入口被重复触发时会重复请求。
+# 改走 trae_task.ps1 后，与定时路径共用同一守卫，重复触发自动 no-op。
 Write-Host "--- [2/2] TRAE 签到 ---"
-$node = $cfg.nodeExe
-if (-not (Test-Path $node)) { $node = $cfg.traeExe }
-$traeOut = & $node (Join-Path $Root "TraeWork\checkin.js") 2>&1
-$traeOut | ForEach-Object { Write-Host $_ }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "TraeWork\trae_task.ps1")
 if ($LASTEXITCODE -ne 0) {
     $failed += "TRAE"
     Write-Warning "TRAE 签到失败（exit=$LASTEXITCODE），详见 AutoCheckin\checkin.log"

@@ -34,12 +34,16 @@ $SkillLog    = $cfg.skillLog
 $SharedLog   = Join-Path $PSScriptRoot 'checkin.log'
 $WbExe       = $cfg.workbuddyExe
 
-$today = Get-Date -Format "yyyy-MM-dd"
-
 # ---- 1) Skip if today's WorkBuddy success is already logged ----
+# 必须同时满足「当天 + [WorkBuddy] + [OK]」三个条件。原写法把两个 -SimpleMatch 模式交给同一个
+# Select-String（多模式之间是 OR），导致含 [WorkBuddy] 的 [FAIL]/[提示] 行也被当成「已成功」而跳过重试。
+# 日期兼容两种格式（本脚本用 yyyy-MM-dd；历史/其它写入方可能用 yyyy/M/d）。
 if (Test-Path $SharedLog) {
-    $hit = Select-String -Path $SharedLog -Encoding UTF8 -Pattern ([regex]::Escape($today)) |
-           Select-String -SimpleMatch "[WorkBuddy]", "[OK]"
+    $todayDash  = Get-Date -Format 'yyyy-MM-dd'
+    $todaySlash = Get-Date -Format 'yyyy/M/d'
+    $hit = Get-Content $SharedLog -Encoding UTF8 -ErrorAction SilentlyContinue |
+           Where-Object { ($_ -like "*$todayDash*" -or $_ -like "*$todaySlash*") -and
+                          ($_ -match '\[WorkBuddy\]') -and ($_ -match '\[OK\]') }
     if ($hit) { exit 0 }
 }
 

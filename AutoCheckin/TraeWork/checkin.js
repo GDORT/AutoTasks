@@ -5,7 +5,13 @@ const crypto = require('crypto');
 function appendLog(line) {
   try {
     const logFile = path.join(__dirname, '..', 'checkin.log');
-    const ts = new Date().toLocaleString('zh-CN', { hour12: false });
+    // 固定 yyyy-MM-dd HH:mm:ss，与 trae_task.ps1「当天已签」守卫的搜索格式一致。
+    // 原用 toLocaleString('zh-CN') 会写成 2026/10/1，守卫按 2026-10-01 搜索永远匹配不到，
+    // 导致同一天被重复执行签到（接口幂等，无资损，但浪费一次调用）。
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    const ts = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+               `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     fs.appendFileSync(logFile, `${ts}  [TRAE]  ${line}\n`, 'utf8');
   } catch (e) {}
 }

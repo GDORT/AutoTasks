@@ -23,6 +23,7 @@ $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RegistryPath = Join-Path $ScriptDir 'task-registry.json'
 $StatusPath   = Join-Path $ScriptDir 'task-status.json'
 $LogPath      = Join-Path $ScriptDir 'task-run.log'
+$LockPath     = Join-Path $ScriptDir 'task-status.lock'
 
 if (-not (Test-Path $RegistryPath)) { Write-Error "registry 缺失: $RegistryPath"; exit 2 }
 $reg = Get-Content $RegistryPath -Encoding UTF8 | ConvertFrom-Json
@@ -37,9 +38,38 @@ function ConvertTo-Hashtable($obj) {
   }
   return $obj
 }
-$statusTbl = @{}
-if (Test-Path $StatusPath) {
-  try { $statusTbl = ConvertTo-Hashtable (Get-Content $StatusPath -Encoding UTF8 | ConvertFrom-Json) } catch { $statusTbl = @{} }
+function Load-Status {
+  $tbl = @{}
+  if (Test-Path $StatusPath) {
+    try { $tbl = ConvertTo-Hashtable (Get-Content $StatusPath -Encoding UTF8 | ConvertFrom-Json) } catch { $tbl = @{} }
+  }
+  return $tbl
+}
+$statusTbl = Load-Status
+
+# ---- 跨进程运行锁 ----
+# task-status.json 的「读 → 判 → 写」不是原子的：同一时点被两个触发源点燃时，
+# 两个进程都会读到「本周期未成功」而双双执行。用排他文件锁串行化，抢到锁后再重读状态。
+function Enter-RunLock([int]$timeoutSec = 600) {
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ($true) {
+    try {
+      return [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew,
+                                   [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    } catch [System.IO.IOException] {
+      # 持锁进程已崩溃导致的残留锁：超过 10 分钟未更新即强制清除（正常任务最长约 1 分钟）
+      if ((Test-Path $LockPath) -and ((Get-Date) - (Get-Item $LockPath).LastWriteTime).TotalMinutes -gt 10) {
+        Remove-Item $LockPath -Force -ErrorAction SilentlyContinue
+        continue
+      }
+      if ((Get-Date) -gt $deadline) { throw "等待运行锁超时(${timeoutSec}s): $LockPath" }
+      Start-Sleep -Milliseconds 500
+    }
+  }
+}
+function Exit-RunLock($fs) {
+  if ($fs) { $fs.Close(); $fs.Dispose() }
+  Remove-Item $LockPath -Force -ErrorAction SilentlyContinue
 }
 
 function Write-Log($m) {
@@ -95,6 +125,10 @@ if ($catchup) {
   Write-Error '需指定 --run <name> / --list / --status / --catchup'
   exit 2
 }
+
+$runLock = Enter-RunLock
+# 抢到锁后重读状态：等待锁期间，另一触发可能已完成本周期
+$statusTbl = Load-Status
 
 foreach ($t in $targets) {
   $name = $t.name
@@ -155,17 +189,23 @@ foreach ($t in $targets) {
       $psi = New-Object System.Diagnostics.ProcessStartInfo
       $psi.FileName = 'powershell.exe'
       $psi.WorkingDirectory = $ScriptDir
-      $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `$env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $($t.command)"
+      # chcp 65001：让子进程内的 native 工具（git 等）按 UTF-8 输出，避免中文乱码
+      $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command chcp 65001 > `$null; `$env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $($t.command)"
       $psi.RedirectStandardOutput = $true
       $psi.RedirectStandardError = $true
+      $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+      $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
       $psi.UseShellExecute = $false
       $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
       $proc = New-Object System.Diagnostics.Process
       $proc.StartInfo = $psi
       [void]$proc.Start()
-      $stdOut = $proc.StandardOutput.ReadToEnd()
-      $errOut = $proc.StandardError.ReadToEnd()
+      # 异步读取两路输出：顺序 ReadToEnd 会在任一路缓冲区写满时互相等待而死锁
+      $outTask = $proc.StandardOutput.ReadToEndAsync()
+      $errTask = $proc.StandardError.ReadToEndAsync()
       $proc.WaitForExit()
+      $stdOut = $outTask.Result
+      $errOut = $errTask.Result
       $exitCode = $proc.ExitCode
       if ($stdOut) { ($stdOut -split "`n") | ForEach-Object { if ($_) { Write-Host $_ } } }
     }
@@ -198,3 +238,5 @@ foreach ($t in $targets) {
   }
   Save-Status
 }
+
+Exit-RunLock $runLock

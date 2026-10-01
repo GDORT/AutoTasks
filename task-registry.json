@@ -25,12 +25,12 @@
     },
     {
       "name": "cdrive-monthly",
-      "description": "C盘月度检查（已改为真正定时：自动化 33c42a3b，每月 1/15 09:00）",
+      "description": "C盘月度检查（自动化 33c42a3b，每月 1/15 09:00 各触发一次）。period=daily 表示去重窗口为「当日」，故 1 日与 15 日两次都会真正执行；若用 monthly 则 1 日成功后 15 日会被误判为「本周期已成功」而跳过。",
       "trigger": { "type": "schedule", "rrule": "FREQ=MONTHLY;BYMONTHDAY=1,15;BYHOUR=9" },
       "reliability": "best-effort",
       "executorType": "shell",
       "command": "& '.\\AutoCDriveMonitor\\check.ps1'",
-      "period": "monthly",
+      "period": "daily",
       "enabled": true
     }
   ]

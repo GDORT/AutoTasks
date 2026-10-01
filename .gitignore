@@ -4,6 +4,7 @@ config.local.json
 # 运行时状态（由 run-task 生成，含路径/结果，不入库）
 task-status.json
 task-run.log
+task-status.lock
 AutoCDriveMonitor/baseline.json
 AutoCDriveMonitor/ALERT.txt
 
