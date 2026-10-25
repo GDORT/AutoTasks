@@ -51,7 +51,7 @@ if (Test-Path $SharedLog) {
 $wbProc = Get-Process -Name "WorkBuddy" -ErrorAction SilentlyContinue
 if (-not $wbProc) {
     if (Test-Path $WbExe) {
-        Start-Process -FilePath $WbExe | Out-Null
+        Start-Process -FilePath $WbExe -WindowStyle Hidden | Out-Null
         # wait for the process to appear (up to 60s)
         $deadline = (Get-Date).AddSeconds(60)
         while (-not (Get-Process -Name "WorkBuddy" -ErrorAction SilentlyContinue)) {

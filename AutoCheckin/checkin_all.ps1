@@ -27,7 +27,7 @@ $failed = @()
 # ---- 1) WorkBuddy（结果由子脚本写入 checkin.log）----
 # 子脚本成功 exit 0 / 失败 exit 5；任一失败则让整体任务标红（不再静默掩盖）
 Write-Host "--- [1/2] WorkBuddy 签到 ---"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "WorkBuddy\workbuddy_checkin.ps1")
+& powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "WorkBuddy\workbuddy_checkin.ps1")
 if ($LASTEXITCODE -ne 0) {
     $failed += "WorkBuddy"
     Write-Warning "WorkBuddy 签到失败（exit=$LASTEXITCODE），详见 WorkBuddy\checkin.log"
@@ -37,7 +37,7 @@ if ($LASTEXITCODE -ne 0) {
 # 原实现直接调 checkin.js，绕过了 trae_task.ps1 的守卫；入口被重复触发时会重复请求。
 # 改走 trae_task.ps1 后，与定时路径共用同一守卫，重复触发自动 no-op。
 Write-Host "--- [2/2] TRAE 签到 ---"
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "TraeWork\trae_task.ps1")
+& powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "TraeWork\trae_task.ps1")
 if ($LASTEXITCODE -ne 0) {
     $failed += "TRAE"
     Write-Warning "TRAE 签到失败（exit=$LASTEXITCODE），详见 AutoCheckin\checkin.log"

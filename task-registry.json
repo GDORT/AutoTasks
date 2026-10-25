@@ -1,8 +1,18 @@
-{
+﻿{
   "version": 1,
   "baseDir": "D:\\AIAppData\\AutoTasks",
   "description": "统一任务注册表：每任务一项，含 触发(trigger) / 可靠性(reliability) / 执行器(executorType) / 命令(command) / 去重周期(period) / 开关(enabled)。Trigger 独立，执行器多态，可靠性按任务标定。",
   "tasks": [
+    {
+      "name": "chat-sync",
+      "description": "OBDOC 全部 AI 对话同步（每日 00:05；调用 60_inbox/AIChatData/同步全部对话.bat，只刷新对话成品，不做差事判断、不提交 git）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=5" },
+      "reliability": "best-effort",
+      "executorType": "shell",
+      "command": "& 'D:\\Programs\\Share\\OBDOC\\60_inbox\\AIChatData\\同步全部对话.bat'",
+      "period": "daily",
+      "enabled": true
+    },
     {
       "name": "chore-scan",
       "description": "OBDOC 差事自动扫描更新（原自动化 7395cdd6，每日 00:10）",
@@ -25,11 +35,31 @@
     },
     {
       "name": "cdrive-monthly",
-      "description": "C盘月度检查（自动化 33c42a3b，每月 1/15 09:00 各触发一次）。period=daily 表示去重窗口为「当日」，故 1 日与 15 日两次都会真正执行；若用 monthly 则 1 日成功后 15 日会被误判为「本周期已成功」而跳过。",
+      "description": "C盘整盘巡检（自动化 33c42a3b；本地计划任务 AutoTasks.cdrive-monthly 每月 1、15 日 09:00 为主源，自动化入口仅作可见性、会降级）。period=daily 表示去重窗口为「当日」，故 1 日与 15 日两次都会真正执行；若用 monthly 则 1 日成功后 15 日会被误判为「本周期已成功」而跳过。口径：全盘 C:\\ 所有 >1MB 文件（Everything es.exe 导出式查询），首次运行建全量清单基线，之后用 dm:>上次时间戳-2分钟 收窄、再与 scan_state.json 差集得真增量。es 缺失/超时 180s 则降级只扫 C:\\Users\\GD 且保留基线。判定规则：导出文件生成即视为查询成功，命中 0 行是合法结论（无新增），不降级。全量清单基线 2026-10-09 23:00 = 12421 个文件 / 117441.7MB，已用 es.exe 独立复核逐位一致。",
       "trigger": { "type": "schedule", "rrule": "FREQ=MONTHLY;BYMONTHDAY=1,15;BYHOUR=9" },
       "reliability": "best-effort",
       "executorType": "shell",
       "command": "& '.\\AutoCDriveMonitor\\check.ps1'",
+      "period": "daily",
+      "enabled": true
+    },
+    {
+      "name": "token-sync-am",
+      "description": "TRAE 桌面版 token 用量同步到 TokenTracker（原云端自动化 10a77585 每 12 小时中的 00:00 那一次；本地化后由计划任务 AutoTasks.token-sync-am 触发）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=0" },
+      "reliability": "best-effort",
+      "executorType": "shell",
+      "command": "$env:TOKENTRACKER_TRAE_CN_USAGE='1'; & 'D:\\Programs\\TokenTracker\\EmbeddedServer\\node.exe' 'D:\\Programs\\TokenTracker\\EmbeddedServer\\tokentracker\\bin\\tracker.js' sync",
+      "period": "daily",
+      "enabled": true
+    },
+    {
+      "name": "token-sync-pm",
+      "description": "TRAE 桌面版 token 用量同步到 TokenTracker（原云端自动化 10a77585 每 12 小时中的 12:00 那一次；本地化后由计划任务 AutoTasks.token-sync-pm 触发）",
+      "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=12;BYMINUTE=0" },
+      "reliability": "best-effort",
+      "executorType": "shell",
+      "command": "$env:TOKENTRACKER_TRAE_CN_USAGE='1'; & 'D:\\Programs\\TokenTracker\\EmbeddedServer\\node.exe' 'D:\\Programs\\TokenTracker\\EmbeddedServer\\tokentracker\\bin\\tracker.js' sync",
       "period": "daily",
       "enabled": true
     }

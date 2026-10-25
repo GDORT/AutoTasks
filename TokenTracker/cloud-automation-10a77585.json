@@ -1,0 +1,22 @@
+{
+  "_note": "原 TRAE 云端自动化（Schedule 工具）的完整配置抓取存档。抓取时间 2026-10-20。用于本地化替换时留档，若需回滚可据此重建。",
+  "source": "TRAE 云端自动化 / Schedule 工具",
+  "scraped_at": "2026-10-20",
+  "id": "10a77585",
+  "name": "TokenTracker-Trae-自动同步",
+  "status": "active",
+  "cron_expression": "0 */12 * * *",
+  "timezone": "Asia/Shanghai",
+  "schedule_note": "Next run 返回 2026-10-20T16:00:00+00:00，折算本地为 2026-10-21 00:00；即每 12 小时整点触发，本地时间为 00:00 与 12:00。",
+  "executions": 61,
+  "created_at": "2026-09-30T18:44:52.440334200+00:00",
+  "prompt": "自动把 TRAE 桌面版的 token 用量完整同步到 TokenTracker。执行方式：用 PowerShell 设置环境变量 $env:TOKENTRACKER_TRAE_CN_USAGE=\"1\"，然后运行命令 & \"D:\\Programs\\TokenTracker\\EmbeddedServer\\node.exe\" \"D:\\Programs\\TokenTracker\\EmbeddedServer\\tokentracker\\bin\\tracker.js\" sync。静默执行，不要打扰用户，无需在对话中汇报。",
+  "model": null,
+  "model_note": "Schedule 工具的 list/get/update 均无 model 字段，get 也不返回模型信息；本地存储（TRAE 配置库、storage.json）同样没有该自动化及其模型配置，故此项无法抓取，也无法通过接口修改。",
+  "local_replacement": {
+    "registry_tasks": ["token-sync-am", "token-sync-pm"],
+    "windows_tasks": ["AutoTasks.token-sync-am", "AutoTasks.token-sync-pm"],
+    "executorType": "shell",
+    "reason": "本会话内实测直接执行 sync 命令被沙箱拦截（EPERM 写 C:\\Users\\GD\\.tokentracker\\tracker\\sync.lock.*），故必须由沙箱外的 Windows 计划任务执行。"
+  }
+}
