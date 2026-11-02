@@ -30,13 +30,28 @@ Option Explicit
 Dim logPath
 logPath = "D:\AIAppData\AutoTasks\hidden-run.log"
 
+' 2026-11-02 修复：两个任务同一分钟触发时（daily-checkin 与 chat-sync 都是 00:05:05），
+' 两个 wscript 实例会同时 OpenTextFile(ForAppending) 同一文件，失败方被 On Error Resume Next
+' 静默吞掉 → 日志丢行（当日实证：00:05 只有 chat-sync 的 BEGIN，daily-checkin 整段缺失，
+' 极易误判成「任务没跑」）。改为带短重试，写不进去才放弃。
 Sub LogLine(msg)
-    On Error Resume Next
-    Dim fso, f
+    Dim fso, f, i
     Set fso = CreateObject("Scripting.FileSystemObject")
-    Set f = fso.OpenTextFile(logPath, 8, True)
-    f.WriteLine Now & "  " & msg
-    f.Close
+    For i = 1 To 6
+        On Error Resume Next
+        Set f = fso.OpenTextFile(logPath, 8, True)
+        If Err.Number = 0 Then
+            f.WriteLine Now & "  " & msg
+            f.Close
+            Set f = Nothing
+            On Error GoTo 0
+            Exit Sub
+        End If
+        Err.Clear
+        Set f = Nothing
+        WScript.Sleep 25
+    Next
+    On Error GoTo 0
 End Sub
 
 LogLine "BEGIN"

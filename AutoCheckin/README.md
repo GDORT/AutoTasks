@@ -1,165 +1,170 @@
-# AutoCheckin · WorkBuddy  &  TRAE 每日自动签到
+# AutoCheckin · WorkBuddy / TRAE / 豆包 每日自动签到
 
-> 接口直签，无 GUI / 无点击 / 零第三方依赖，幂等（已签自动跳过，绝不重复领取）。
-> 本地完成，token 不外传；只读登录态、日志只记结果。
+> 三家各自独立、各自幂等（当天已成功则 no-op，绝不重复领取）。
+> 本地完成，凭据不外传；日志只记结果，不记 token。
+> 最后一次与代码对齐：**2026-11-01 17:45**（豆包 v4.1 / WorkBuddy v3.2 / TRAE 不变）
 
-## 当前架构（2026-09-25 更新）
+## 一、三家一览
 
-WorkBuddy 客户端 5.6.2 起登录态改为加密存储（AtRestEncryption），旧明文 token 方案失效。
-现由 **SkillHub「WorkBuddy签到助手」skill**（`~\.workbuddy\skills\totorosir-workbuddy-checkin`）
-负责 WorkBuddy 签到：自动识别明文/加密登录态，加密时通过运行中客户端内存定位密钥解密。
-TRAE 方案不变（读 storage.json 解密 token）。
+| 家 | 后端 | 需要 GUI 窗口吗 | 结果日志 | 成功判据 |
+|---|---|---|---|---|
+| WorkBuddy | `vendor/workbuddy-auto-signin/signin.py auto`（上游 88lin，MIT） | **不需要**。凭据靠 `ELECTRON_RUN_AS_NODE=1` 起一次性无窗口 helper 解密，跑完即退 | `WorkBuddy\checkin.log` | `result` ∈ `CLAIMED/ALREADY/INACTIVE` |
+| TRAE | `TraeWork\checkin.js`（读 storage.json 解密 token） | 不需要 | `AutoCheckin\checkin.log` | js 自身写 `[TRAE] [OK]` |
+| 豆包 | `vendor/doubao-cdp`（上游 bluechonk，MIT，npm 零依赖） | **需要客户端在线，但窗口进独立桌面**，你的桌面看不到、也不抢焦点 | `Doubao\checkin.log` | `result.status` ∈ `checked_in/already_checked_in/dry_run` |
 
-**统一执行策略**（WorkBuddy 与 TRAE 完全一致）：
+> ⚠️ **三家的"当天已签"守卫各看各的日志文件**，不是同一份。排障时先确认看的是哪个文件。
 
-```
-触发 → 查共享日志 checkin.log：今天已有 [OK] ？
-   ├─ 有 → 静默退出（不执行、不重复、不拉客户端）
-   └─ 没有 → 执行签到 → 结果写共享日志
-```
-
-WorkBuddy 侧签到前会自动确保 `WorkBuddy.exe` 在运行（不在则启动并等待登录态加载约 80 秒）。
-
-## 目录结构
+## 二、执行链（唯一执行路径）
 
 ```
-D:\AIAppData\AutoTasks\AutoCheckin\
-├── checkin.log                      共享日志（所有来源汇总，带前缀；"当天已签"守卫依据）
-├── checkin_all.ps1                  手动一键签到（同时触发两者）
-├── register_tasks.ps1               一键注册/重注册计划任务（幂等覆盖）
-├── WorkBuddy\
-│   └── workbuddy_checkin.ps1        包装脚本 v2：查日志跳过 → 确保客户端运行 → 调 skill 签到 → 写日志
-└── TraeWork\
-    ├── checkin.js                   TRAE 签到脚本（读 storage.json 解密 token）
-    ├── trae_task.ps1                TRAE 计划任务入口：查日志跳过 → 跑 checkin.js → 写日志
-    └── run_checkin.cmd              手动运行入口（显示结果并停留；计划任务不再直接用它）
+触发（计划任务 wscript → hidden-run.vbs @00:05）
+  └→ run-task.ps1 --run daily-checkin      跨进程文件锁 + 周期去重 + 终态记录
+       └→ checkin_all.ps1                  串联三家，任一失败整体非零
+            ├→ [1/3] WorkBuddy\workbuddy_checkin.ps1
+            ├→ [2/3] TraeWork\trae_task.ps1
+            └→ [3/3] Doubao\doubao_checkin.ps1
 ```
 
-## 触发层（2026-10-01 schtasks / workbuddy.db 实测核对）
+- **入口只负责触发**，不得自行执行 `checkin_all.ps1`，也不得再调 `--done`（`executorType=shell` 时 run-task 自动记终态）。
+- 退出码语义：`0` 成功（含今日已签）/ `5` 失败 / `6` 跳过（该家脚本未部署，**不算失败**）。
 
-**架构**：两条入口都只是「触发器」，职责仅为 ①确保 WorkBuddy 在跑 ②到点放行。
-真正的**执行只在下游一条链上发生一次**：
-
-```
-trigger(2 条) → run-task.ps1 --run daily-checkin（跨进程锁 + 周期去重）→ checkin_all.ps1
-                 ├─→ workbuddy_checkin.ps1（不在则启动 WorkBuddy.exe → skill 签到）
-                 └─→ trae_task.ps1（守卫 → 内部调 checkin.js 签到）
-```
+## 三、触发层
 
 | 来源 | 时间 | 入口 | 说明 |
 |---|---|---|---|
-| WorkBuddy 自动化 `31e98286` | 每天 00:05 | `run-task.ps1 --run daily-checkin` | 主触发源（需 WorkBuddy 在运行） |
-| Windows 计划任务 `AutoTasks.daily-checkin` | 每天 00:05 | `run-task.ps1 --run daily-checkin` | 本地兜底触发（**不依赖 WorkBuddy 是否在运行**；`StartWhenAvailable` 关机日开机补跑） |
-| 手动 | 任意 | `checkin_all.ps1` / 对话 | 随时 |
+| Windows 计划任务 `AutoTasks.daily-checkin` | 每天 00:05 | `wscript.exe hidden-run.vbs daily-checkin` | **主兜底**，不依赖任何 GUI 是否在运行；`StartWhenAvailable=True` 关机日开机补跑；`MultipleInstances=IgnoreNew` |
+| WorkBuddy 自动化 `31e98286` | 每天 00:05 | `run-task.ps1 --run daily-checkin` | 需 WorkBuddy 在运行 |
+| 手动 | 任意 | `checkin_all.ps1` | 排障用 |
 
-> **同点 00:05 是刻意的**：Windows 任务这一路在机器开机且已登录时**必然发起**（哪怕 WorkBuddy 没开，它会把 WorkBuddy 拉起来完成签到），
-> 弥补「WorkBuddy 自动化只在客户端运行时才触发」的盲区。两条入口都只调 `run-task`，由
-> **跨进程文件锁**（`task-status.lock`）+ 抢锁后重读状态保证只有一方真正执行，另一方 no-op——
-> 所以同点并发不再需要靠错开时间去规避。
+> 两条入口同为 00:05 是刻意的：由 `run-task.ps1` 的跨进程文件锁 `task-status.lock`（抢锁后重读状态）保证只有一方真正执行，另一方 no-op。
 >
-> ⚠️ **入口必须写成「只触发」**：WorkBuddy 自动化 `31e98286` 的 prompt 历史上把「执行」也写了进去
-> （触发后又单独跑一次 `checkin_all.ps1`），造成同一次运行内 TRAE 被重复请求。入口 prompt 只应调
-> `run-task.ps1 --run daily-checkin`，不要再自行执行 `checkin_all.ps1`，也不要再调 `--done`
-> （`executorType=shell` 时 run-task 已自动记录终态）。
->
-> 原 6 个 `AutoCheckin.*` 计划任务已确认注销（`schtasks` 查无此任务）。
->
-> **Windows 不会自动清理失效任务**：计划任务即使连续失败、脚本路径丢失也只会留在
-> 任务计划程序里记录错误，不会被删除或禁用。长期不用的任务要手动 `schtasks /Delete`。
+> **任务动作必须是 `wscript.exe + vbs`**，不能直接注册 `powershell.exe`：后者是 console 子系统程序，Task Scheduler 启动时会**先创建可见控制台再隐藏**（实测差 ~240ms），每天整点闪一次窗抢焦点。vbs 走 `WScript.Shell.Run(cmd, 0, True)`，控制台从创建起就不可见。
 
-## 手动执行（验证是否可用）
+## 四、目录结构
 
-### 一键签到（推荐，同时触发 WorkBuddy + TRAE）
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\checkin_all.ps1"
+```
+D:\AIAppData\AutoTasks\AutoCheckin\
+├── checkin.log                       TRAE 结果 + 手工汇总（`[TRAE]` 前缀）
+├── checkin_all.ps1                   一键三签（串联 + 汇总失败）
+├── README.md                         本文件
+├── WorkBuddy\
+│   ├── workbuddy_checkin.ps1         v3.2：守卫 → 代理变量清理 → signin.py auto（失败重试 1 次）
+│   └── checkin.log                   WorkBuddy 结果（`[WorkBuddy]` 前缀）
+├── TraeWork\
+│   ├── checkin.js                    TRAE 签到本体
+│   ├── trae_task.ps1                 守卫 → 跑 checkin.js
+│   └── run_checkin.cmd               手动入口（显示结果并停留）
+└── Doubao\
+    ├── doubao_checkin.ps1            v4.1：守卫 → 互斥锁 → 独立桌面启动 → CDP 签到 → 收尾
+    └── checkin.log                   豆包结果（`[Doubao]` 前缀）
 ```
 
-### 单独签一个
+## 五、豆包签到（v4.1，2026-11-01）
+
+### 5.1 为什么要独立桌面
+
+豆包是 Electron 客户端，靠 CDP（`--remote-debugging-port=9222`）接管页面点击。若按常规方式启动：
+
+- `STARTUPINFO.wShowWindow = SW_SHOWMINNOACTIVE(7)` → **Electron 直接忽略**，实测启动后 +0.9s 前台就被切走；
+- 启动后再最小化/挪到屏幕外 → 焦点已经被抢走，事后 `SWP_NOACTIVATE` 只阻止再次激活，**不归还已有焦点**（2026-11-01 发生过输入法被占用、键盘重复输入的事故）。
+
+现做法：`CreateDesktop("DoubaoBotDesktop")` 建一个不属于你桌面的 Desktop，`CreateProcess` 的 `STARTUPINFO.lpDesktop` 指过去 → 窗口存在于另一个桌面，**你的桌面既看不到也不会被抢焦点**（实测全程前台 hwnd 变化 0 次）。CDP 不受影响：页面照常渲染，点击走 `Input.dispatchMouseEvent` 注入渲染器，与桌面/焦点无关。
+
+> **PowerShell 坑**：把 `$null` 传给 .NET `string` 参数会变成空串 `""` 而非 NULL 指针 → `CreateDesktop` 报 `err=87`。必须传 `[NullString]::Value`。
+
+### 5.2 桌面不会被残留
+
+Windows **没有** `DeleteDesktop`。桌面是引用计数对象：关闭最后一个句柄、且其上没有窗口再持有引用时，由内核自动销毁。
+
+| 情况 | 谁清理 | 结果 |
+|---|---|---|
+| 正常签完 | `finally` 里 `CloseDesktop` | 立即销毁 |
+| 脚本被强杀 / 断电 | 句柄随进程回收，引用计数归零 | 同样销毁 |
+| 豆包进程没退净（窗口持有引用） | 下次 `OpenDesktop` 接管同名桌面，签完一起清 | 不堆积 |
+
+桌面名固定 `DoubaoBotDesktop`，所以即使某次残留同名桌面，下次也是**接管**而不是新建第二个。收尾时用 `OpenDesktop` 反查一次：打不开（`err=2 ERROR_FILE_NOT_FOUND`）= 已销毁，结果写进日志。
+
+### 5.3 可控性措施
+
+| 措施 | 解决什么 |
+|---|---|
+| 单实例互斥锁 `Local\AutoTasks-DoubaoCheckin` | 手动跑与计划任务撞车（A 的 taskkill 会打断 B 的签到）；锁本身不可用时降级为无锁继续并留 WARN，不因此放弃签到 |
+| 主流程整体 `try/finally` | 成功/失败/超时/异常**任何**分支都执行收尾（关进程 + 释放桌面） |
+| 双超时 | 等调试端口 45s、CLI 300s，超时即收尾退出 |
+| **不回退弹窗** | 独立桌面起不来就直接判 FAIL——宁可本次不签，也不为签到抢你的前台 |
+| 当天守卫 | 日志里今天已有 `[Doubao] [OK]` → 直接 exit 0，完全不碰客户端（不会反复重试） |
+| 收尾自证 | 进程数 + 桌面对象是否销毁，逐项写日志 |
+
+### 5.4 客户端生命周期（2026-11-01 用户决定）
+
+1. 今天已记 `[OK]` → 不碰客户端；
+2. 调试端口已开 → 复用现有实例，签完关闭；
+3. 其余 → 结束已有实例 → 独立桌面启动 → 等端口 → 签到 → **一律关闭**。
+
+> 已接受的代价：若 00:05 正开着豆包，会被直接结束（聊天记录不丢，未发送的输入可能丢）。
+
+### 5.5 已知边界（如实标注）
+
+- **真实点击已实测通过（2026-11-02 00:05 首次真跑）**：`result=checked_in`，额度 `200 -> 600`，10s 完成；收尾 `进程 14 -> 0`、桌面对象已销毁。即「独立桌面里注入点击」这条路成立，不只是能读状态。若后续 FAIL，按上游 `vendor/doubao-cdp/docs/04-verification.md` 与 `SKILL.md` 排障表查（最常见是客户端改版导致入口文案变化，改 `src/checkin.mjs` 的 `ANCHORS.signinEntryText` 一处即可）。
+- 客户端升级若改变 `Doubao.exe` 路径，`config.local.json` 的 `doubaoExe` 需同步。
+- 锁屏状态下 CDP 渲染是否可用未实测（00:05 通常醒着）。
+
+## 六、WorkBuddy 签到（v3.2）
+
+- **不再启动 GUI**：凭据通过 `WorkBuddy.exe -e <helper>` + `ELECTRON_RUN_AS_NODE=1` 在无窗口 helper 进程里解密，跑完即退。因此**不存在「用完关闭客户端」的问题**（旧版会拉起 WorkBuddy.exe 等 80 秒，已废弃）。
+- 覆盖：每日签到 + 成长中心（旅行礼物 / 任务 / 断登补登 / 连登兑换 / 盲盒）。
+- **一次重试**：读凭据偶发 `PermissionError`（2026-11-01 实测同一条命令先 ERROR 后 ALREADY），而本脚本一天只跑一次、失败即当天断签，故失败重试 1 次（间隔 5s）。签到接口幂等，重试不会重复领取。
+- **两路取 JSON**：正常结果在 stdout，但实测偶发「JSON 只出现在 stderr」导致 ALREADY 被误判成 FAIL，现在 stdout / stderr 都扫。
+- **代理变量清理**：环境块同时存在 `HTTPS_PROXY` 与 `https_proxy` 时，.NET 构造子进程环境字典抛「已添加项，字典中的关键字重复」，表现为连 `cmd` 都起不来。脚本自己清一次（`run-task` 路径也有一份同样的清理）。
+
+## 七、验证是否签到成功
+
 ```powershell
-# WorkBuddy（包装脚本，自动查日志/拉客户端）
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\WorkBuddy\workbuddy_checkin.ps1"
+# 三家分别看
+Get-Content "D:\AIAppData\AutoTasks\AutoCheckin\WorkBuddy\checkin.log" -Tail 5 -Encoding UTF8
+Get-Content "D:\AIAppData\AutoTasks\AutoCheckin\checkin.log"         -Tail 5 -Encoding UTF8
+Get-Content "D:\AIAppData\AutoTasks\AutoCheckin\Doubao\checkin.log"  -Tail 5 -Encoding UTF8
 
-# TRAE（手动运行会显示结果并停留；计划任务走 trae_task.ps1）
-"D:\AIAppData\AutoTasks\AutoCheckin\TraeWork\run_checkin.cmd"
-```
-
-预期输出（今天已签时）：
-- WorkBuddy：`[OK] 今天已签到，获得 100 积分（幂等跳过，不重复领取）`
-- TRAE：`[OK] Already checked in today. Credits: 150`
-
-## ~~一键注册每日计划任务~~（已废弃，勿运行）
-
-`register_tasks.ps1` 会重新注册 6 个 `AutoCheckin.WorkBuddy/TraeWork.{0010,0910,2010}` 计划任务，
-而这正是统一任务层（AutoTasks + run-task）要消除的"重复触发"。该 6 个任务已于 2026-09-27 注销。
-
-签到触发现已统一收口到 `run-task`（见上方「触发层」表）。**请勿再运行 `register_tasks.ps1`**；
-确需本地补跑兜底时，用 `run-task.ps1 --catchup` 或 Windows 计划任务的 `StartWhenAvailable`。
-
-## 验证是否签到成功
-
-看共享日志（WorkBuddy 带 `[WorkBuddy]`，TRAE 带 `[TRAE]` 前缀）：
-```powershell
-Get-Content "D:\AIAppData\AutoTasks\AutoCheckin\checkin.log" -Tail 20 -Encoding UTF8
-```
-
-查任务状态（现役任务名是 `AutoTasks.daily-checkin`）：
-```powershell
-schtasks /Query /FO TABLE | findstr AutoTasks
+# 统一任务终态
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\run-task.ps1" --status
 schtasks /Query /TN "AutoTasks.daily-checkin" /V /FO LIST
 ```
 
-## 已知问题（2026-10-01 实测 → 已修复）
+## 八、手动执行
 
-- **重复触发** → 已修复：两条入口同为 00:05，由 `run-task.ps1` 的跨进程文件锁
-  （`task-status.lock`）+ 抢锁后重读状态保证只有一方真正执行，另一方 no-op。
-- **TRAE 日志守卫失效（日期格式不一致）** → 已修复：`checkin.js` 的 `appendLog` 改为固定
-  `yyyy-MM-dd HH:mm:ss`；守卫同时兼容 `yyyy-MM-dd` 与 `yyyy/M/d` 两种历史格式。
-- **守卫多模式是"或"** → 已修复：两侧守卫改为 `Where-Object` 显式 AND
-  （「当天」+ `[TRAE]`/`[WorkBuddy]` + `[OK]` 三者同时满足），含 `[FAIL]`/`[RETRY]` 的行不再被误判为已成功。
-- **`checkin_all.ps1` 绕过 TRAE 守卫** → 已修复：TRAE 段改走 `TraeWork\trae_task.ps1`，
-  复用「当天已签则跳过」守卫；入口被重复触发时不再重复请求。
+```powershell
+# 三签一起（推荐排障用）
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\checkin_all.ps1"
 
-## WorkBuddy 签到对 buddy 进程的依赖（2026-10-01 实测）
+# 单签一家（-Force 绕过当天守卫，仅排障）
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\WorkBuddy\workbuddy_checkin.ps1" -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\TraeWork\trae_task.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\AIAppData\AutoTasks\AutoCheckin\Doubao\doubao_checkin.ps1" -Force
+```
 
-签到本身是**纯 HTTP 接口**（`POST {base}/billing/meter/daily-checkin` + `Authorization: Bearer <accessToken>`），
-**不依赖 buddy 进程**；真正依赖 buddy 的只有**解密 `accessToken`** 这一步：
+## 九、前置条件
 
-- 5.6.2+ 把 `accessToken` 存成 AES-GCM 信封（`$wbEncrypted:1`），密钥 `atRestSecretKey` 按序定位：
-  ① 环境变量 `WORKBUDDY_ATREST_KEY` → ② `WORKBUDDY_ATREST_KEY_FILE` → ③ 磁盘 DPAPI blob →
-  ④ **运行中 `WorkBuddy.exe` 进程内存**。
-- 实测（屏蔽 ④ 后）：**磁盘侧定位失败（扫描到 0 个 DPAPI blob）**；只有开启 ④ 内存扫描才成功
-  （`load_token_best` 返回 token_len=1334）。`~\.workbuddy\keyblob` 经查**不是** DPAPI blob，非该密钥。
-  → **现状下 buddy 不在跑就无法签到**——这正是「buddy 加密导致不可用」的真身。
+- 机器 00:05 开机 + 已登录（交互式会话）+ 联网；关机日由 `StartWhenAvailable` 在开机登录后补跑。
+- 锁屏状态（未登录）不发起——任务 `LogonType=Interactive`，需交互式会话。
+- `config.local.json` 需存在且路径有效（`python` / `signinScript` / `nodeExe` / `doubaoScript` / `doubaoNode` / `doubaoExe` / `traeExe`），模板见 `config.local.example.json`。
 
-**若要让签到彻底脱离 buddy**：在 buddy 运行期间把 `atRestSecretKey` 取一次并持久化，
-设 `WORKBUDDY_ATREST_KEY_FILE=<该文件绝对路径>`（或 `WORKBUDDY_ATREST_KEY=<44字符base64>`），
-此后 ①/② 命中即无需 buddy。**代价**：buddy 重新登录可能轮换该密钥（keyId 变化）需重取；
-脚本会以 keyId 不匹配明确报错，不会静默失败。
+## 十、已知问题与修复记录
 
-> 该密钥等同「解密登录态的钥匙」，落盘即降低安全性，是否启用需自行权衡（默认不启用）。
+| 日期 | 问题 | 处置 |
+|---|---|---|
+| 2026-10-01 | 双入口重复执行 | `run-task` 跨进程文件锁 + 抢锁后重读状态 |
+| 2026-10-01 | TRAE 守卫日期格式不一致 | `appendLog` 固定 `yyyy-MM-dd HH:mm:ss`，守卫兼容两种格式 |
+| 2026-10-01 | 守卫多模式是 OR，FAIL 行被当成功 | 改 `Where-Object` 显式三者 AND |
+| 2026-10-01 | `checkin_all` 绕过 TRAE 守卫 | TRAE 段改走 `trae_task.ps1` |
+| 2026-10-25 | 计划任务整点闪窗抢焦点 | 任务动作全改 `wscript.exe + hidden-run.vbs`（`Run(cmd,0,True)`） |
+| 2026-11-01 | 豆包窗口抢前台、导致输入法被占用 | 改独立桌面（见 5.1） |
+| 2026-11-01 | 豆包收尾可能被异常跳过 | 主流程包 `try/finally` + 收尾自证 |
+| 2026-11-01 | 豆包互斥锁用 `Global\` 在受限令牌下会抛异常 | 改 `Local\`，且锁不可用时降级继续 |
+| 2026-11-01 | `run-task` 子进程 `WaitForExit()` 无限等待 | 加 25min 超时 + 按进程树强杀（exit=124） |
+| 2026-11-01 | WorkBuddy 偶发 PermissionError / 代理变量字典冲突 | 失败重试 1 次 + 自身清理代理变量 + 两路取 JSON |
 
-## 前置条件
-- WorkBuddy：本机已登录一次（登录态在 `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`，5.6.2+ 为加密格式）；**计划任务触发时客户端可以不开**——包装脚本会自动启动它
-- WorkBuddy skill：`~\.workbuddy\skills\totorosir-workbuddy-checkin`（升级 = 从 SkillHub 重下 ZIP 替换该目录，WorkBuddy 内自动化每天 00:05 会检查新版本并提醒）
-- TRAE：本机已登录 TRAE SOLO CN（登录态在 `%APPDATA%\TRAE SOLO CN\User\globalStorage\storage.json` 的 `iCubeAuthInfo://icube.cloudide`）
-- 机器在 00:05 时开机、已登录且联网；未开机则下次开机登录后由 `StartWhenAvailable` 立即补跑
+## 十一、安全
 
-### 开机即签到的「保证边界」（2026-10-01 核对任务 XML）
-
-| 场景 | 结果 |
-|---|---|
-| 00:05 时机器开机 + 已登录 + 联网 | ✅ 必然发起（Windows 任务这一路不依赖 WorkBuddy 是否在跑） |
-| 00:05 时关机/休眠 | ✅ 下次开机登录后 `StartWhenAvailable` 立即补跑 |
-| 开机但未登录（停留在锁屏） | ⚠️ 不发起——任务 `LogonType=InteractiveToken`，需交互式登录会话 |
-| 00:05 在机但断网 | ⚠️ 该次失败记 `fail`；**当天不会自动重试**（任务无重复间隔，`--catchup` 启动钩子未接线） |
-
-> 后两个缺口若要补：① 给任务加「重复间隔」（如 00:05 起每 30 分钟重试至成功）；② 或把 `run-task.ps1 --catchup`
-> 接到登录/启动项上（`AutoAppTriggers\app-registry.json` 的 `hooks` 目前为空，等于未启用）。
-
-> **TRAE 关键说明**：签到接口需真实设备 ID（来自 storage.json 顶层 `iCubeAuthInfo://icube-dc:xxxx` 键，脚本自动提取），并携带请求体 `req_source:1`，否则报 9004（订单参数错误）。脚本已按实测 `code:0` 判定成功，接口开放、无需风控规避。
-
-## 安全
-- 全程只读取本机登录态，不修改、不删除、不外传
-- 脚本绝不打印真实 token / uid，只显示脱敏信息
-- WorkBuddy skill 已人工审计 + 腾讯科恩/云鼎实验室公开审计（均无风险）；密钥定位只用 DPAPI/内存扫描，均在脚本目录留痕
-- token 会随客户端长期登录自动刷新；如连续失败，先看 `checkin.log` 末尾错误行，再考虑重开客户端登录一次
+- 全程只读本机登录态，不修改、不删除、不外传；脚本不打印真实 token / uid。
+- `vendor/` 下两个后端均为 MIT 开源，本地只做了最小改动（豆包：`ANCHORS.signinEntryText` 一处；WorkBuddy：无改动）。
+- 豆包命令行不落凭据：CDP 只操作已登录客户端，密钥材料不经过本仓库。

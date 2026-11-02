@@ -25,7 +25,7 @@
     },
     {
       "name": "daily-checkin",
-      "description": "每日签到（WorkBuddy+TRAE 双签；must，可靠性靠本地计划任务 AutoTasks.daily-checkin 的 StartWhenAvailable 兜底——PC 关机日开机自动补跑，经 run-task 闸门去重/记状态）",
+      "description": "每日签到（WorkBuddy + TRAE + 豆包 三签；must，可靠性靠本地计划任务 AutoTasks.daily-checkin 的 StartWhenAvailable 兜底——PC 关机日开机自动补跑，经 run-task 闸门去重/记状态）。三家各自幂等、各自「当天已 OK 则 no-op」。WorkBuddy 用 vendor/workbuddy-auto-signin/signin.py auto（签到+成长中心：旅行礼物/任务/断登补登/连登兑换/盲盒），经 ELECTRON_RUN_AS_NODE 起一次性无窗口 helper 解密凭据，不启动 GUI；豆包用 vendor/doubao-cdp（bluechonk/doubao-auto-checkin，npm 零依赖，CDP 接管客户端；先结束旧实例，再用 CreateDesktop 在独立桌面 DoubaoBotDesktop 启动，签到后一律关闭——窗口不进入用户桌面、不抢前台焦点；v4.1 起主流程 try/finally 无条件收尾、单实例 Local\\ 互斥锁防并发撞车、独立桌面起不来就判失败不回退弹窗、收尾用 OpenDesktop 反查桌面对象是否已销毁）；TRAE 走 trae_task.ps1。脚本缺失时该家自动跳过（exit 6），不算失败。",
       "trigger": { "type": "schedule", "rrule": "FREQ=DAILY;BYHOUR=0;BYMINUTE=5" },
       "reliability": "must",
       "executorType": "shell",

@@ -25,3 +25,9 @@ _*.txt
 AutoCDriveMonitor/scan_state.json
 # vbs 无窗口启动器分步日志
 hidden-run.log
+
+# 第三方签到脚本与依赖（上游 MIT，非本项目代码；来源见 config.local.example.json 注释）
+# workbuddy-auto-signin  https://github.com/88lin/workbuddy-auto-signin
+# doubao-auto-checkin    https://github.com/tututashu/doubao-auto-checkin
+vendor/
+

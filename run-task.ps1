@@ -297,10 +297,23 @@ foreach ($t in $targets) {
         # 异步读取两路输出：顺序 ReadToEnd 会在任一路缓冲区写满时互相等待而死锁
         $outTask = $proc.StandardOutput.ReadToEndAsync()
         $errTask = $proc.StandardError.ReadToEndAsync()
-        $proc.WaitForExit()
-        $stdOut = $outTask.Result
-        $errOut = $errTask.Result
-        $exitCode = $proc.ExitCode
+        # [FIX-W2 2026-11-01] 超时保护。原来是无参 WaitForExit()，即**无限等待**：
+        # 执行器一旦挂死（TLS 握手卡住、客户端等渲染、脚本死循环），这里就永远不返回；
+        # 计划任务的 PT30M 到点只会杀掉 wscript 宿主，留下孤儿 powershell 与残留子进程，
+        # 且运行锁要等「10 分钟未更新」才被下一次强制清除，期间所有任务被堵。
+        # 25 分钟 = 给 PT30M 留 5 分钟缓冲；超时按进程树强杀并记 exit=124。
+        $waitMs = 25 * 60 * 1000
+        if (-not $proc.WaitForExit($waitMs)) {
+            try { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } catch { }
+            try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+            $stdOut   = ''
+            $errOut   = "执行器超时(>25min)，已按进程树强制终止（cmd=$($t.command)）"
+            $exitCode = 124
+        } else {
+            $stdOut   = $outTask.Result
+            $errOut   = $errTask.Result
+            $exitCode = $proc.ExitCode
+        }
         if ($stdOut) { ($stdOut -split "`n") | ForEach-Object { if ($_) { Write-Host $_ } } }
       }
     }
